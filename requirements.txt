@@ -1,0 +1,14 @@
+streamlit>=1.48
+streamlit-folium>=0.22
+folium>=0.17
+imdlib
+geopandas>=0.14
+shapely>=2.0
+pyogrio
+pandas
+numpy
+xarray
+netCDF4
+requests
+openpyxl
+altair>=5
