@@ -38,6 +38,8 @@ Downloaded IMD files are saved in a data folder and reused, so each year is down
 | `app.py` | The screens: choosing data, the map, charts and download buttons |
 | `imd_tools.py` | The engine: downloading, reading, averaging, summaries, indices, trends, downloads |
 | `charts.py` | The charts |
+| `india_boundary.geojson` | India's boundary for the map (simplified from the India country boundary shapefile) |
+| `.streamlit/config.toml` | The app's colours and font |
 | `requirements.txt` | The Python packages needed |
 
 ## Two ways to run it
@@ -65,18 +67,31 @@ and are reused next time, so each year is downloaded only once.
 
 ## How to use it
 
-1. **Sidebar:** pick the variables, the years, the extra outputs, and the options
-   (rainfall date shift, "days since rain").
-2. **Where?** choose one of:
-   - **Points:** type names and coordinates in the table, click the map to add points, or
-     load a CSV file with latitude and longitude columns.
-   - **A box:** type the four edges, or draw a rectangle on the map.
-   - **Upload boundary file:** a zipped shapefile (or the .shp, .shx, .dbf and .prj parts together),
-     GeoJSON, GeoPackage or KML. Pick the column that holds the catchment names.
-3. Check the blue grid cells on the map.
-4. Press **Get the data**. Look through the sections (Overview, Charts, Compare sites,
-   Rain indices, Trends, Map of grid cells), then download the zip of CSV files or make
-   the Excel workbook.
+The screen works like a Google Earth Engine app: the control panel on the left, the map on the right,
+and the results below.
+
+1. **Choose places on the map.** Use the tools on the map's left edge: 📍 a point, ▭ a box, or
+   ⬠ draw your catchment's outline. 🔍 searches for a place name. The coordinates under the mouse
+   show in the bottom-left corner. You can also:
+   - **upload a boundary file:** a zipped shapefile (or the .shp, .shx, .dbf and .prj parts together),
+     GeoJSON, GeoPackage or KML, then pick the column that holds the names;
+   - **type coordinates** or **load a CSV** of points (latitude and longitude columns).
+   Every place appears in the **Places** list under the map, where you can rename or remove it.
+   The blue squares show the IMD grid cells that will be used (darker = more of the cell is inside).
+2. **Left panel:** pick the variables, the years (1991 to 2020, the last 10 years, the full record,
+   or your own), and any extra outputs. Rarely needed settings (rainfall date shift, "days since
+   rain", data folder) are under **Advanced options**. Nothing reloads while you change these.
+3. Press **Get the data**. The app says how many files it must download from IMD and roughly how long
+   it will take; files are saved and reused next time.
+4. **Results:** headline numbers for each site, then the sections Overview, Charts, Compare sites,
+   Rain indices, Trends and Map of grid cells. Download the zip of CSV files or make the Excel workbook.
+
+New here? Press **✨ Try an example** at the top right.
+
+The map shows India's boundary from the India country boundary shapefile (simplified for the web)
+and the IMD grid as faint lines. Switch between the rainfall grid (0.25°) and the temperature grid
+(1°), and between the light, street and satellite base maps. Background map tiles come from third
+parties and may draw borders differently; the dark outline is the one to go by.
 
 ## How the numbers are worked out
 

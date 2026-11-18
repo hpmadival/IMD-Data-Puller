@@ -1,48 +1,103 @@
 """
 IMD Data Puller: a small web app to get IMD gridded rainfall and temperature
-for a point, a box, or catchment boundaries, and download it.
+for points, boxes, or catchment boundaries, and download it.
+
+Layout (like a Google Earth Engine app):
+  left   - the control panel: what, when, extras, advanced options, Get the data
+  right  - the map: draw points, boxes or outlines, search places, upload boundaries
+  below  - the results: summary cards, charts, tables and downloads
 
 Run it with:   streamlit run app.py
 """
 
 import datetime
+import json
 import os
 
 import folium
 import numpy as np
 import pandas as pd
+import shapely
 import streamlit as st
-from folium.plugins import Draw
-from shapely.geometry import Point, box, shape
+from folium.plugins import Draw, Fullscreen, Geocoder, MousePosition
+from shapely.geometry import Point, box, mapping, shape
 from streamlit_folium import st_folium
 
 import charts as C
 import imd_tools as T
 
-st.set_page_config(page_title="IMD Data Puller", page_icon="🌧️", layout="wide")
+st.set_page_config(page_title="IMD Data Puller", page_icon="🌧️", layout="wide",
+                   initial_sidebar_state="collapsed")
 
-THIS_YEAR = datetime.date.today().year
+HERE = os.path.dirname(os.path.abspath(__file__))
+TODAY = datetime.date.today()
+THIS_YEAR = TODAY.year
+LAST_YEAR = THIS_YEAR - 1 if TODAY.month >= 6 else THIS_YEAR - 2   # latest year IMD has usually published
 NAME_OF = {v: T.VARIABLES[v]["name"] for v in T.VARIABLES}
+INDIA_CENTRE, INDIA_ZOOM = [22.5, 80.5], 5
 ss = st.session_state
-ss.setdefault("points", pd.DataFrame({"Name": ["Point 1"], "Latitude": [12.30], "Longitude": [75.60]}))
-ss.setdefault("points_version", 0)
-ss.setdefault("box", {"Name": "My area", "North": 12.60, "South": 12.00, "West": 75.00, "East": 75.80})
-ss.setdefault("box_version", 0)
+ss.setdefault("places", [])          # list of {"name", "geojson"}
+ss.setdefault("map_version", 0)      # bump to redraw the map from scratch
 ss.setdefault("result", None)
+ss.setdefault("f_vars", ["rain"])
+ss.setdefault("f_pet", False)
+ss.setdefault("f_years_choice", "Last 10 years")
+
+# --- a cleaner look: hide Streamlit's own menu, header and footer, tighten spacing ---
+st.markdown("""
+<style>
+#MainMenu, footer, header[data-testid="stHeader"] {visibility: hidden; height: 0;}
+div[data-testid="stToolbar"] {display: none;}
+.block-container {padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1500px;}
+div[data-testid="stMetric"] {background: #f5f8fc; border: 1px solid #e3e9f2; border-radius: 10px;
+                             padding: 10px 14px;}
+div[data-testid="stMetricLabel"] p {font-size: 0.85rem; color: #52606d;}
+.panel-title {font-size: 0.8rem; letter-spacing: .04em; color: #6b7785; margin: 0.6rem 0 0.1rem 0;}
+.hint {color: #52606d; font-size: 0.92rem; margin-bottom: 0.3rem;}
+</style>""", unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
-# Small cached helpers (so a click doesn't redo slow work)
+# Cached helpers (so a click doesn't redo slow work)
 # ---------------------------------------------------------------------------
+@st.cache_resource(show_spinner=False)
+def india_layers():
+    """India's boundary (simplified from the official shapefile) and the two IMD
+    grids drawn as thin lines, clipped to India. Worked out once per server."""
+    with open(os.path.join(HERE, "india_boundary.geojson"), encoding="utf-8") as f:
+        india = json.load(f)
+    area = shapely.simplify(shape(india["geometry"]).buffer(0.05), 0.05)
+    grids = {}
+    for key, grid in (("rain", T.RAIN_GRID), ("tmax", T.TEMP_GRID)):
+        x0, y0, x1, y1 = grid.bounds
+        xs = np.arange(x0, x1 + 1e-9, grid.step)
+        ys = np.arange(y0, y1 + 1e-9, grid.step)
+        lines = ([shapely.LineString([(x, y0), (x, y1)]) for x in xs] +
+                 [shapely.LineString([(x0, y), (x1, y)]) for y in ys])
+        clipped = shapely.set_precision(shapely.intersection(shapely.MultiLineString(lines), area), 0.001)
+        grids[key] = {"type": "Feature", "properties": {}, "geometry": mapping(clipped)}
+    return india, grids
+
+
 @st.cache_data(ttl=60, show_spinner=False)
 def saved_counts(data_dir, backup_dir):
     return {v: T.saved_count(data_dir, v, backup_dir) for v in T.VARIABLES}
 
 
-@st.cache_data(ttl=60, show_spinner=False)
-def years_to_download(need, start, end, data_dir, backup_dir):
-    return sum(1 for v in need for y in range(start, end + 1)
-               if y >= T.VARIABLES[v]["first_year"] and not T.is_available(data_dir, v, y, backup_dir))
+def files_to_download(need, years, data_dir, backup_dir):
+    """How many yearly files must come from IMD, and a rough time for it."""
+    todo = [(v, y) for v in need for y in years
+            if y >= T.VARIABLES[v]["first_year"] and not T.is_available(data_dir, v, y, backup_dir)]
+    rain = sum(1 for v, _ in todo if v == "rain")
+    seconds = (rain * 20 + (len(todo) - rain) * 4) / 3          # three at a time
+    return len(todo), seconds
+
+
+def nice_time(seconds):
+    if seconds < 60:
+        return "under a minute"
+    minutes = round(seconds / 60)
+    return f"about {minutes} minute{'s' if minutes != 1 else ''}"
 
 
 @st.cache_data(show_spinner=False, max_entries=500)
@@ -51,14 +106,39 @@ def preview_cells(wkb, var):
     return T.cells_for_site(T.Site("x", W.loads(wkb)), var)
 
 
-@st.cache_data(show_spinner=False, max_entries=500)
+@st.cache_data(show_spinner=False, max_entries=1000)
 def area_of(wkb):
     from shapely import wkb as W
     return T.area_km2(W.loads(wkb))
 
 
+def current_sites():
+    used = set()
+    return [T.Site(T.clean_name(p["name"], used), shape(p["geojson"])) for p in ss.places]
+
+
+def add_place(name, geom):
+    used = {p["name"] for p in ss.places}
+    ss.places.append({"name": T.clean_name(name, used), "geojson": mapping(geom)})
+    ss.map_version += 1
+
+
+def refresh_map_area():
+    """Redraw just the map area; fall back to the whole page if that isn't possible."""
+    from streamlit.errors import StreamlitInvalidLayoutContextError
+    try:
+        st.rerun(scope="fragment")
+    except StreamlitInvalidLayoutContextError:
+        st.rerun()
+
+
+def next_name(kind):
+    n = sum(1 for p in ss.places if p["name"].startswith(kind)) + 1
+    return f"{kind} {n}"
+
+
 def cells_geojson(sites, var):
-    """All preview cells as one GeoJSON layer (one layer draws far faster than many squares)."""
+    """Grid cells used by the chosen places, as one layer (fast to draw)."""
     h = T.VARIABLES[var]["grid"].step / 2
     feats = []
     for s in sites:
@@ -67,189 +147,204 @@ def cells_geojson(sites, var):
             frac = 1.0 if s.is_point else float(fr)
             tip = f"Cell {la:.2f} N, {lo:.2f} E" + ("" if s.is_point else f" | {frac * 100:.0f}% inside")
             feats.append({"type": "Feature",
-                          "properties": {"tip": tip, "op": round(0.1 + 0.4 * min(frac, 1.0), 3)},
+                          "properties": {"tip": tip, "op": round(0.12 + 0.45 * min(frac, 1.0), 3)},
                           "geometry": {"type": "Polygon", "coordinates": [[
-                              [lo - h, la - h], [lo + h, la - h], [lo + h, la + h], [lo - h, la + h], [lo - h, la - h]]]}})
+                              [lo - h, la - h], [lo + h, la - h], [lo + h, la + h], [lo - h, la + h],
+                              [lo - h, la - h]]]}})
     return {"type": "FeatureCollection", "features": feats}
 
 
 # ---------------------------------------------------------------------------
-# Sidebar: what, when, extras
+# "Try an example" (applied before the widgets are drawn)
 # ---------------------------------------------------------------------------
-with st.sidebar:
-    st.header("1. What data")
-    variables = st.multiselect("Variables", list(T.VARIABLES), default=["rain"],
-                               format_func=NAME_OF.get)
-    add_pet = st.checkbox(
-        "Add potential evaporation (Hargreaves)",
-        help="An estimate of how much water the air could evaporate each day, worked out "
-             "from maximum and minimum temperature. Both temperatures are pulled automatically.")
+if ss.pop("load_example", False):
+    ss.places = []
+    add_place("Mangaluru", Point(74.856, 12.914))
+    add_place("Upper Netravati area", box(75.20, 12.55, 75.75, 13.05))
+    ss["f_vars"] = ["rain", "tmax", "tmin"]
+    ss["f_pet"] = True
+    ss["f_years_choice"] = "Last 10 years"
 
-    st.header("2. Which years")
-    chosen = set(variables) | ({"tmax", "tmin"} if add_pet else set())
-    earliest = min([T.VARIABLES[v]["first_year"] for v in chosen] or [1901])
-    c1, c2 = st.columns(2)
-    start_year = c1.number_input("From", min_value=1901, max_value=THIS_YEAR,
-                                 value=max(1991, earliest), step=1)
-    end_year = c2.number_input("To", min_value=1901, max_value=THIS_YEAR, value=2020, step=1)
-    st.caption("Rainfall starts in 1901, temperature in 1951. IMD usually publishes "
-               "a year's files a few months after it ends.")
 
-    st.header("3. Extra outputs")
-    keep_cells = st.checkbox("Daily values of every grid cell (CSV)",
-                             help="The values of each grid cell before averaging, one column per cell.")
-    keep_grid = st.checkbox("Cut-out grid (NetCDF)",
-                            help="The grid around your sites, for use in GIS or Python.")
+# ---------------------------------------------------------------------------
+# Page header
+# ---------------------------------------------------------------------------
+head_l, head_r = st.columns([3, 1])
+head_l.markdown("## 🌧️ IMD Data Puller")
+head_l.markdown("<div class='hint'>Daily gridded rainfall and temperature from the India Meteorological "
+                "Department, for points, boxes or your own catchments, with charts and ready-to-use "
+                "downloads.</div>", unsafe_allow_html=True)
+if head_r.button("✨ Try an example", width="stretch",
+                 help="Loads a sample point and area near Mangaluru, with the last 10 years."):
+    ss.load_example = True
+    st.rerun()
 
-    st.header("4. Options")
-    shift_label = st.selectbox(
-        "Rainfall dates", list(T.DATE_SHIFT_TEXT.values()), index=0,
-        help="IMD's rain day runs from 8:30 am to 8:30 am. If your streamflow or other records "
-             "file the same day under a different date, move rainfall by one day so the two line up.")
-    rain_shift = {v: k for k, v in T.DATE_SHIFT_TEXT.items()}[shift_label]
-    add_dsr = st.checkbox("Add a 'Days since rain' column",
-                          help="Counts the days since the last rainy day. Handy for picking dry-weather "
-                               "periods, such as recession periods.")
-    dsr_mm = st.number_input("A day counts as rainy from (mm)", min_value=0.1, value=1.0, step=0.5,
-                             disabled=not add_dsr)
+panel, mapcol = st.columns([1, 2.6], gap="medium")
+data_dir_default = os.environ.get("IMD_DATA_DIR", "imd-data")
+backup_dir = os.environ.get("IMD_BACKUP_DIR") or None
 
-    st.header("Data folder")
-    data_dir = st.text_input(
-        "Downloaded IMD files are kept here",
-        value=os.environ.get("IMD_DATA_DIR", "imd-data"),
-        help="Each year is downloaded once and reused next time. Use a folder on a fast local "
-             "disk; in Colab the notebook sets this up for you.")
-    backup_dir = os.environ.get("IMD_BACKUP_DIR") or None
-    if backup_dir:
-        st.caption(f"Backup copies go to: {backup_dir}")
+
+# ---------------------------------------------------------------------------
+# Left: the control panel (a form, so nothing reloads until you press the button)
+# ---------------------------------------------------------------------------
+with panel:
+    with st.form("controls", border=True):
+        st.markdown("<div class='panel-title'>1 · WHAT</div>", unsafe_allow_html=True)
+        variables = st.multiselect("Variables", list(T.VARIABLES),
+                                   format_func=NAME_OF.get, key="f_vars", label_visibility="collapsed",
+                                   placeholder="Choose variables")
+        add_pet = st.checkbox("Add potential evaporation (Hargreaves)", key="f_pet",
+                              help="An estimate of how much water the air could evaporate each day, from "
+                                   "maximum and minimum temperature. Both are pulled automatically.")
+
+        st.markdown("<div class='panel-title'>2 · WHEN</div>", unsafe_allow_html=True)
+        years_choice = st.radio("Years", ["1991 to 2020", "Last 10 years", "Full record", "Choose years"],
+                                horizontal=True, key="f_years_choice", label_visibility="collapsed")
+        c1, c2 = st.columns(2)
+        pick_start = c1.number_input("From", 1901, THIS_YEAR, 1991, step=1, key="f_start")
+        pick_end = c2.number_input("To", 1901, THIS_YEAR, 2020, step=1, key="f_end")
+        st.caption("From and To are used when 'Choose years' is selected. Rainfall starts in 1901, "
+                   "temperature in 1951; a year appears a few months after it ends.")
+
+        st.markdown("<div class='panel-title'>3 · EXTRA OUTPUTS</div>", unsafe_allow_html=True)
+        keep_cells = st.checkbox("Daily values of every grid cell (CSV)", key="f_cells",
+                                 help="Each grid cell's values before averaging, one column per cell.")
+        keep_grid = st.checkbox("Cut-out grid (NetCDF)", key="f_grid",
+                                help="The grid around your places, for GIS or Python.")
+
+        with st.expander("Advanced options"):
+            shift_label = st.selectbox(
+                "Rainfall dates", list(T.DATE_SHIFT_TEXT.values()), index=0, key="f_shift",
+                help="Only for matching rainfall day by day with streamflow or other records. IMD's rain "
+                     "day runs from 8:30 am to 8:30 am; if your other data files the same day under a "
+                     "different date, move rainfall by one day. Most users leave this alone.")
+            add_dsr = st.checkbox("Add a 'Days since rain' column", key="f_dsr",
+                                  help="Days since the last rainy day. Handy for picking dry-weather "
+                                       "(recession) periods.")
+            dsr_mm = st.number_input("A day counts as rainy from (mm)", min_value=0.1, value=1.0,
+                                     step=0.5, key="f_dsr_mm")
+            data_dir = st.text_input("Data folder", value=data_dir_default, key="f_data_dir",
+                                     help="Where downloaded IMD files are kept and reused. Change it only "
+                                          "to reuse IMD files you already have on this computer.")
+        submitted = st.form_submit_button("Get the data", type="primary", width="stretch")
+
     saved = saved_counts(data_dir, backup_dir)
-    st.caption("Years already saved: " + ", ".join(f"{NAME_OF[v].lower()} {n}" for v, n in saved.items()))
-    if T.backups_pending():
-        st.caption(f"Copying {T.backups_pending()} new file(s) to the backup folder in the background.")
+    st.caption("Years saved on this server: " +
+               ", ".join(f"{NAME_OF[v].lower()} {n}" for v, n in saved.items()))
+
+rain_shift = {v: k for k, v in T.DATE_SHIFT_TEXT.items()}[shift_label]
 
 
 # ---------------------------------------------------------------------------
-# Map helper
+# Right: the map and the list of places (a fragment: map clicks redraw only this part)
 # ---------------------------------------------------------------------------
-def make_map(sites, grid_var, draw=False):
-    m = folium.Map(location=[20, 78], zoom_start=5, control_scale=True)
-    folium.TileLayer("Esri.WorldImagery", name="Satellite", show=False).add_to(m)
-    total_cells = 0
+def build_map(sites, grid_var, base):
+    india, grids = india_layers()
+    m = folium.Map(location=INDIA_CENTRE, zoom_start=INDIA_ZOOM, tiles=None, control_scale=True,
+                   min_zoom=4, prefer_canvas=True)
+    if base == "Light map":
+        folium.TileLayer("Esri.WorldGrayCanvas", name="Light map").add_to(m)
+    elif base == "Satellite":
+        folium.TileLayer("Esri.WorldImagery", name="Satellite").add_to(m)
+    else:
+        folium.TileLayer("OpenStreetMap", name="Street map").add_to(m)
+    line = "#ffffff" if base == "Satellite" else "#8a8f98"
+    folium.GeoJson(grids[grid_var], name="IMD grid", interactive=False,
+                   style_function=lambda _: {"color": line, "weight": 0.5, "opacity": 0.45}).add_to(m)
+    folium.GeoJson(india, name="India boundary", interactive=False,
+                   style_function=lambda _: {"color": "#3d4652" if base != "Satellite" else "#ffffff",
+                                             "weight": 1.3, "fill": False}).add_to(m)
+    gj = cells_geojson(sites, grid_var)
+    if 0 < len(gj["features"]) <= 20000:
+        folium.GeoJson(gj, name="Grid cells used",
+                       style_function=lambda f: {"color": "#2a78d6", "weight": 0.8, "fillColor": "#2a78d6",
+                                                 "fillOpacity": f["properties"]["op"]},
+                       tooltip=folium.GeoJsonTooltip(fields=["tip"], labels=False)).add_to(m)
     for s in sites:
         if s.is_point:
-            folium.Marker([s.geometry.y, s.geometry.x], tooltip=s.name).add_to(m)
+            folium.CircleMarker([s.geometry.y, s.geometry.x], radius=6, color="#ffffff", weight=2,
+                                fill=True, fill_color="#eb6834", fill_opacity=1, tooltip=s.name).add_to(m)
         else:
-            folium.GeoJson(s.geometry.__geo_interface__, tooltip=s.name,
-                           style_function=lambda _: {"color": "#d62728", "weight": 2,
-                                                     "fillOpacity": 0.05}).add_to(m)
-    # grid cells that will be used (preview: assumes every cell has data), as one layer
-    gj = cells_geojson(sites, grid_var)
-    total_cells = len(gj["features"])
-    if 0 < total_cells <= 20000:
-        folium.GeoJson(gj, name="Grid cells",
-                       style_function=lambda f: {"color": "#1f77b4", "weight": 1,
-                                                 "fillColor": "#1f77b4", "fillOpacity": f["properties"]["op"]},
-                       tooltip=folium.GeoJsonTooltip(fields=["tip"], labels=False)).add_to(m)
-    if draw:
-        Draw(draw_options={"rectangle": True, "polyline": False, "polygon": False,
-                           "circle": False, "marker": False, "circlemarker": False},
-             edit_options={"edit": False, "remove": False}).add_to(m)
+            folium.GeoJson(mapping(s.geometry), tooltip=s.name,
+                           style_function=lambda _: {"color": "#eb6834", "weight": 2.2,
+                                                     "fillOpacity": 0.04}).add_to(m)
+    Draw(position="topleft",
+         draw_options={"marker": True, "rectangle": True, "polygon": {"allowIntersection": False},
+                       "polyline": False, "circle": False, "circlemarker": False},
+         edit_options={"edit": False, "remove": False}).add_to(m)
+    Geocoder(position="topright", collapsed=True, add_marker=False).add_to(m)
+    MousePosition(position="bottomleft", separator=" N,  ", num_digits=4, prefix="",
+                  lat_formatter="function(n){return L.Util.formatNum(n,4)}",
+                  lng_formatter="function(n){return L.Util.formatNum(n,4) + ' E'}").add_to(m)
+    Fullscreen(position="topleft").add_to(m)
     if sites:
         minx, miny, maxx, maxy = np.array([s.geometry.bounds for s in sites]).T
-        pad = 0.3
+        pad = 0.4
         m.fit_bounds([[miny.min() - pad, minx.min() - pad], [maxy.max() + pad, maxx.max() + pad]])
-    folium.LayerControl().add_to(m)
-    return m, total_cells
+    return m
 
 
-# ---------------------------------------------------------------------------
-# Main page: where
-# ---------------------------------------------------------------------------
-st.title("🌧️ IMD Data Puller")
-st.write("Get IMD's daily gridded rainfall and temperature for points, a box, or your own "
-         "catchment boundaries, then download it as ready-to-use files.")
+@st.fragment
+def map_section():
+    sites = current_sites()
+    t1, t2 = st.columns([1.4, 1])
+    grid_label = t1.radio("Grid", ["Rainfall grid (0.25°)", "Temperature grid (1°)"], horizontal=True,
+                          key="grid_choice", label_visibility="collapsed")
+    base = t2.radio("Base map", ["Light map", "Street map", "Satellite"], horizontal=True,
+                    key="base_choice", label_visibility="collapsed")
+    grid_var = "rain" if grid_label.startswith("Rain") else "tmax"
+    if not sites:
+        st.markdown("<div class='hint'>Use the tools on the map's left edge: 📍 a point, ▭ a box, or "
+                    "⬠ draw your catchment's outline. Search a place with 🔍. Or upload a boundary "
+                    "file or a list of points below.</div>", unsafe_allow_html=True)
+    out = st_folium(build_map(sites, grid_var, base), key=f"map_{ss.map_version}", height=560,
+                    use_container_width=True, returned_objects=["last_active_drawing"])
+    drawing = (out or {}).get("last_active_drawing")
+    if drawing and drawing.get("geometry"):
+        sig = json.dumps(drawing["geometry"], sort_keys=True)
+        if sig != ss.get("seen_drawing"):
+            ss.seen_drawing = sig
+            geom = shape(drawing["geometry"])
+            if geom.geom_type == "Point":
+                add_place(next_name("Point"), geom)
+            elif abs(geom.area - geom.envelope.area) < 1e-9:
+                add_place(next_name("Box"), geom)
+            else:
+                add_place(next_name("Area"), shapely.make_valid(geom))
+            refresh_map_area()
 
-st.subheader("Where?")
-mode = st.radio("Choose how to pick the place", ["Points", "A box", "Upload boundary file"],
-                horizontal=True, label_visibility="collapsed")
-grid_choice = st.radio("Show grid cells on the map for",
-                       ["Rainfall (0.25° cells)", "Temperature (1° cells)"], horizontal=True)
-grid_var = "rain" if grid_choice.startswith("Rain") else "tmax"
+    # --- the places chosen so far ---
+    if sites:
+        st.markdown(f"**Places ({len(sites)})** · rename by typing in the Name column, tick Remove to drop one")
+        table = pd.DataFrame({
+            "Name": [s.name for s in sites],
+            "Type": ["Point" if s.is_point else "Area" for s in sites],
+            "Latitude": [round(s.centre[0], 4) for s in sites],
+            "Longitude": [round(s.centre[1], 4) for s in sites],
+            "Area (km²)": ["" if s.is_point else f"{area_of(s.geometry.wkb):,.1f}" for s in sites],
+            "Remove": [False] * len(sites)})
+        edited = st.data_editor(table, key=f"places_{ss.map_version}", hide_index=True, width="stretch",
+                                disabled=["Type", "Latitude", "Longitude", "Area (km²)"],
+                                height=min(320, 38 + 35 * len(sites)))
+        a, b = st.columns([1, 1])
+        if a.button("Apply changes to the list", width="stretch"):
+            keep = []
+            for p, (_, row) in zip(ss.places, edited.iterrows()):
+                if not row["Remove"]:
+                    keep.append({"name": str(row["Name"]).strip() or p["name"], "geojson": p["geojson"]})
+            ss.places = keep
+            ss.map_version += 1
+            refresh_map_area()
+        if b.button("Clear all places", width="stretch"):
+            ss.places = []
+            ss.map_version += 1
+            refresh_map_area()
 
-sites = []
-left, right = st.columns([1, 2])
-
-if mode == "Points":
-    with left:
-        with st.expander("Load many points from a CSV file"):
-            st.caption("The file needs a column for latitude and one for longitude, "
-                       "and ideally one for names.")
-            pts_file = st.file_uploader("Points file", type=["csv", "txt"], label_visibility="collapsed")
-            if pts_file is not None and ss.get("pts_file_key") != (pts_file.name, pts_file.size):
-                ss.pts_file_key = (pts_file.name, pts_file.size)
-                try:
-                    table = pd.read_csv(pts_file)
-                    ss.points = T.points_from_table(table)
-                    ss.points_version += 1
-                    st.rerun()
-                except Exception as err:
-                    st.error(f"Could not read the points: {err}")
-        st.write("Type points in the table, or click the map to add one.")
-        edited = st.data_editor(
-            ss.points, key=f"points_{ss.points_version}", num_rows="dynamic", width="stretch",
-            column_config={"Latitude": st.column_config.NumberColumn(format="%.4f", min_value=-90, max_value=90),
-                           "Longitude": st.column_config.NumberColumn(format="%.4f", min_value=-180, max_value=180)})
-        used = set()
-        for i, r in edited.reset_index(drop=True).iterrows():
-            if pd.notna(r.get("Latitude")) and pd.notna(r.get("Longitude")):
-                name = r.get("Name") if isinstance(r.get("Name"), str) and r.get("Name").strip() else f"Point {i + 1}"
-                sites.append(T.Site(T.clean_name(name, used), Point(float(r.Longitude), float(r.Latitude))))
-    with right:
-        m, _ = make_map(sites, grid_var)
-        out = st_folium(m, key="map_points", height=480, use_container_width=True,
-                        returned_objects=["last_clicked"])
-        click = (out or {}).get("last_clicked")
-        if click and (click["lat"], click["lng"]) != ss.get("seen_click"):
-            ss.seen_click = (click["lat"], click["lng"])
-            new = pd.DataFrame({"Name": [f"Point {len(edited) + 1}"],
-                                "Latitude": [round(click["lat"], 4)], "Longitude": [round(click["lng"], 4)]})
-            ss.points = pd.concat([edited, new], ignore_index=True)
-            ss.points_version += 1
-            st.rerun()
-
-elif mode == "A box":
-    with left:
-        st.write("Type the edges of the box, or draw a rectangle on the map "
-                 "(the square button on the map's left side).")
-        v = ss.box_version
-        name = st.text_input("Name", ss.box["Name"], key=f"bn{v}")
-        a, b = st.columns(2)
-        north = a.number_input("North edge (latitude)", value=ss.box["North"], format="%.4f", key=f"bN{v}")
-        south = b.number_input("South edge (latitude)", value=ss.box["South"], format="%.4f", key=f"bS{v}")
-        west = a.number_input("West edge (longitude)", value=ss.box["West"], format="%.4f", key=f"bW{v}")
-        east = b.number_input("East edge (longitude)", value=ss.box["East"], format="%.4f", key=f"bE{v}")
-        if north > south and east > west:
-            sites = [T.Site(name or "My area", box(west, south, east, north))]
-        else:
-            st.error("North must be bigger than south, and east bigger than west.")
-    with right:
-        m, _ = make_map(sites, grid_var, draw=True)
-        out = st_folium(m, key="map_box", height=480, use_container_width=True,
-                        returned_objects=["last_active_drawing"])
-        drawing = (out or {}).get("last_active_drawing")
-        if drawing and str(drawing) != ss.get("seen_drawing"):
-            ss.seen_drawing = str(drawing)
-            w, s_, e, n = shape(drawing["geometry"]).bounds
-            ss.box = {"Name": name, "North": round(n, 4), "South": round(s_, 4),
-                      "West": round(w, 4), "East": round(e, 4)}
-            ss.box_version += 1
-            st.rerun()
-
-else:
-    with left:
+    # --- other ways to add places ---
+    with st.expander("Upload a boundary file (shapefile, GeoJSON, GeoPackage or KML)"):
         files = st.file_uploader(
             "Zipped shapefile, or the .shp .shx .dbf .prj parts together, or GeoJSON / GeoPackage / KML",
-            accept_multiple_files=True,
+            accept_multiple_files=True, key="boundary_upload",
             type=["zip", "shp", "shx", "dbf", "prj", "cpg", "geojson", "json", "gpkg", "kml"])
         if files:
             key = tuple((f.name, f.size) for f in files)
@@ -270,69 +365,89 @@ else:
                 guess = T.guess_name_column(gdf)
                 name_col = st.selectbox("Which column holds the names?", cols or ["(none)"],
                                         index=cols.index(guess) if guess in cols else 0)
-                sites = T.sites_from_frame(gdf, name_col if cols else None)
-                st.caption(f"{len(sites)} shape(s) found.")
-                st.dataframe(pd.DataFrame({
-                    "Name": [s.name for s in sites],
-                    "Type": ["Point" if s.is_point else "Area" for s in sites],
-                    "Area (km²)": [round(area_of(s.geometry.wkb), 1) for s in sites]}),
-                    hide_index=True, width="stretch", height=min(300, 40 + 35 * len(sites)))
-    with right:
-        m, n_cells = make_map(sites, grid_var)
-        st_folium(m, key="map_upload", height=480, use_container_width=True, returned_objects=[])
-        if n_cells > 20000:
-            st.caption("Too many grid cells to draw on the map; they will still be used.")
+                new_sites = T.sites_from_frame(gdf, name_col if cols else None)
+                if st.button(f"Add these {len(new_sites)} shape(s) to the map", type="primary"):
+                    for s in new_sites:
+                        add_place(s.name, s.geometry)
+                    refresh_map_area()
 
-st.caption("Blue squares are the IMD grid cells that will be used. Darker means more of the cell "
-           "is inside your area. For points, the nearest cell with data is used.")
+    with st.expander("Add points by typing coordinates, or from a CSV file"):
+        c1, c2, c3, c4 = st.columns([1.3, 1, 1, 0.7])
+        pname = c1.text_input("Name", placeholder="e.g. Udupi")
+        plat = c2.number_input("Latitude", -90.0, 90.0, value=None, format="%.4f", placeholder="13.3409")
+        plon = c3.number_input("Longitude", -180.0, 180.0, value=None, format="%.4f", placeholder="74.7421")
+        c4.write("")
+        if c4.button("Add", width="stretch") and plat is not None and plon is not None:
+            add_place(pname.strip() or next_name("Point"), Point(plon, plat))
+            refresh_map_area()
+        pts_file = st.file_uploader("CSV with latitude and longitude columns (and ideally names)",
+                                    type=["csv", "txt"], key="points_upload")
+        if pts_file is not None and ss.get("pts_file_key") != (pts_file.name, pts_file.size):
+            try:
+                table = T.points_from_table(pd.read_csv(pts_file))
+                for r in table.itertuples(index=False):
+                    add_place(r.Name, Point(r.Longitude, r.Latitude))
+                ss.pts_file_key = (pts_file.name, pts_file.size)
+                refresh_map_area()
+            except Exception as err:
+                st.error(f"Could not read the points: {err}")
 
 
+with mapcol:
+    map_section()
 
 
 # ---------------------------------------------------------------------------
-# Get the data
+# Get the data (runs only when the form's button is pressed)
 # ---------------------------------------------------------------------------
-st.subheader("Get the data")
-problems = []
-if not sites:
-    problems.append("Add at least one point or area.")
-if not variables and not add_pet:
-    problems.append("Pick at least one variable in the sidebar.")
-if start_year > end_year:
-    problems.append("The 'From' year is after the 'To' year.")
-if add_dsr and "rain" not in variables:
-    problems.append("'Days since rain' needs Rainfall to be one of the variables.")
-outside = T.check_inside_india(sites) if sites else []
-if outside:
-    problems.append("These are outside IMD's India grid: " + ", ".join(outside))
+if years_choice == "1991 to 2020":
+    start_year, end_year = 1991, 2020
+elif years_choice == "Last 10 years":
+    start_year, end_year = LAST_YEAR - 9, LAST_YEAR
+elif years_choice == "Full record":
+    need_first = [T.VARIABLES[v]["first_year"] for v in (set(variables) | ({"tmax", "tmin"} if add_pet else set()))]
+    start_year, end_year = (max(need_first) if need_first else 1901), LAST_YEAR
+else:
+    start_year, end_year = int(pick_start), int(pick_end)
 
-if not problems:
-    need = tuple(sorted(set(variables) | ({"tmax", "tmin"} if add_pet else set())))
-    to_get = years_to_download(need, int(start_year), int(end_year), data_dir, backup_dir)
-    if to_get:
-        st.info(f"{to_get} yearly file(s) need downloading from IMD first "
-                f"(rainfall files are about 25 MB each, three are fetched at a time). "
-                f"This can take a while; they are saved for next time.")
-for p in problems:
-    st.warning(p)
-
-if st.button("Get the data", type="primary", disabled=bool(problems)):
-    bar = st.progress(0.0, text="Starting")
-    try:
-        res = T.pull_data(sites, variables, int(start_year), int(end_year), data_dir,
-                          add_pet=add_pet, keep_cell_values=keep_cells, keep_grid=keep_grid,
-                          rain_shift=rain_shift, days_since_rain_mm=dsr_mm if add_dsr else None,
-                          backup_dir=backup_dir,
-                          progress=lambda f, msg: bar.progress(min(max(f, 0.0), 1.0), text=msg))
-        res.settings["How the place was chosen"] = mode
-        bar.progress(1.0, text="Working out summaries and packing the files")
-        tables = T.all_tables(res)
-        ss.result = {"res": res, "tables": tables, "zip": T.build_zip(res, tables), "excel": None}
-        saved_counts.clear(); years_to_download.clear()
-        bar.empty()
-    except Exception as err:
-        bar.empty()
-        st.error(f"Something went wrong: {err}")
+if submitted:
+    sites = current_sites()
+    problems = []
+    if not sites:
+        problems.append("Add at least one place on the map first.")
+    if not variables and not add_pet:
+        problems.append("Choose at least one variable.")
+    if start_year > end_year:
+        problems.append("The 'From' year is after the 'To' year.")
+    if add_dsr and "rain" not in variables:
+        problems.append("'Days since rain' needs Rainfall to be one of the variables.")
+    outside = T.check_inside_india(sites) if sites else []
+    if outside:
+        problems.append("These are outside IMD's India grid: " + ", ".join(outside))
+    if problems:
+        for p in problems:
+            st.warning(p)
+    else:
+        need = sorted(set(variables) | ({"tmax", "tmin"} if add_pet else set()))
+        n_files, secs = files_to_download(need, range(start_year, end_year + 1), data_dir, backup_dir)
+        first_msg = (f"Downloading {n_files} yearly file(s) from IMD, {nice_time(secs)}. "
+                     "They are saved for next time." if n_files else "All files are already saved. Reading them.")
+        bar = st.progress(0.0, text=first_msg)
+        try:
+            res = T.pull_data(sites, variables, start_year, end_year, data_dir,
+                              add_pet=add_pet, keep_cell_values=keep_cells, keep_grid=keep_grid,
+                              rain_shift=rain_shift, days_since_rain_mm=dsr_mm if add_dsr else None,
+                              backup_dir=backup_dir,
+                              progress=lambda f, msg: bar.progress(min(max(f, 0.0), 1.0),
+                                                                   text=f"{msg}  ({first_msg})" if n_files else msg))
+            bar.progress(1.0, text="Working out summaries and packing the files")
+            tables = T.all_tables(res)
+            ss.result = {"res": res, "tables": tables, "zip": T.build_zip(res, tables), "excel": None}
+            saved_counts.clear()
+            bar.empty()
+        except Exception as err:
+            bar.empty()
+            st.error(f"Something went wrong: {err}")
 
 
 # ---------------------------------------------------------------------------
@@ -362,15 +477,61 @@ def downloads_box(res, tables):
                            width="stretch")
 
 
+def summary_cards(res, tables, site):
+    """Four headline numbers for one site."""
+    df = res.daily[site]
+    yt = T.yearly_table(df)
+    tr = tables["Trends"]
+    tr = tr[tr.Site == site] if len(tr) else tr
+    rain = T.VARIABLES["rain"]["column"]
+    cards = []
+    if rain in df and yt[rain].notna().any():
+        cards.append(("Mean annual rainfall", f"{yt[rain].mean():,.0f} mm", "Average of the complete years."))
+        mons = "Monsoon rainfall, June to September (mm)"
+        share = 100 * yt[mons].sum() / yt[rain].sum() if yt[rain].sum() else np.nan
+        cards.append(("Monsoon share", f"{share:.0f}%", "Share of the year's rain from June to September."))
+        ri = tables["Rain indices"]
+        ri = ri[ri.Site == site] if len(ri) else ri
+        if len(ri) and ri["Wettest day (mm)"].notna().any():
+            i = ri["Wettest day (mm)"].idxmax()
+            day = df.loc[df.index.year == int(ri.loc[i, "Year"]), rain].idxmax()
+            cards.append(("Wettest day", f"{ri.loc[i, 'Wettest day (mm)']:.0f} mm",
+                          f"On {day:%d %b %Y}."))
+        main = rain
+    else:
+        for v in ("tmax", "tmin"):
+            col = T.VARIABLES[v]["column"]
+            if col in df:
+                cards.append((f"Mean {T.VARIABLES[v]['name'].lower()}", f"{df[col].mean():.1f} °C",
+                              "Average over all days."))
+        main = next((T.VARIABLES[v]["column"] for v in ("tmax", "tmin") if T.VARIABLES[v]["column"] in df), None)
+    row = tr[tr.Measure == main] if (len(tr) and main) else pd.DataFrame()
+    if len(row):
+        r0 = row.iloc[0]
+        unit = "mm" if main == rain else "°C"
+        verdict = "clear trend" if r0["Clear trend? (p below 0.05)"].startswith("Yes") else "no clear trend"
+        cards.append(("Trend per decade", f"{r0['Change per decade']:+.1f} {unit}",
+                      f"{verdict.capitalize()} (Mann-Kendall p = {r0['p-value']:.2f})."))
+    else:
+        cards.append(("Trend per decade", "–", "Needs at least 8 complete years."))
+    cols = st.columns(len(cards))
+    for col, (label, value, note) in zip(cols, cards):
+        col.metric(label, value, help=note)
+        col.caption(note)
+
+
 def overview_tab(res, tables, site_names):
-    st.write("**Summary by site**")
-    show_table(tables["Summary by site"])
     a, b = st.columns([2, 1])
-    site = a.selectbox("Daily data for", site_names, key="ov_site")
+    site = a.selectbox("Site", site_names, key="ov_site")
+    b.write("")
     b.download_button(f"⬇️ Daily data for {site} (CSV)",
                       res.daily[site].to_csv(date_format="%Y-%m-%d").encode("utf-8-sig"),
                       file_name=f"{T.safe_file_name(site)} daily.csv", mime="text/csv", width="stretch")
-    show_table(res.daily[site].reset_index(), height=280)
+    summary_cards(res, tables, site)
+    st.write("**Daily data**")
+    show_table(res.daily[site].reset_index(), height=260)
+    st.write("**Summary of all sites**")
+    show_table(tables["Summary by site"])
 
 
 def charts_tab(res, site_names):
@@ -547,4 +708,6 @@ if ss.result:
 
 st.divider()
 st.caption("Data: India Meteorological Department (IMD), Pune. Rainfall 0.25° (Pai et al., 2014); "
-           "temperature 1° (Srivastava et al., 2009). Please cite IMD when you use it.")
+           "temperature 1° (Srivastava et al., 2009). Please cite IMD when you use it. "
+           "The dark outline is India's boundary from the India country boundary shapefile, simplified "
+           "for the web; background map tiles come from third parties and may draw borders differently.")
