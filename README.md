@@ -42,7 +42,7 @@ Downloaded IMD files are saved in a data folder and reused, so each year is down
 
 ## Two ways to run it
 
-### 1. Online (easiest): open the web link
+### 1. Online (easiest): open the web link < https://imd-data-puller-app.streamlit.app/ >
 The app runs on Streamlit Community Cloud. Open its link in any browser; nothing to install.
 
 - If nobody has used it for a few days, it goes to sleep. The first visit then takes about a minute.
