@@ -7,6 +7,11 @@ authors:
     given-names: Harshit Prakash
 version: 1.0.0
 date-released: 2026-11-19
+doi: 10.5281/zenodo.24352511
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.24352511
+    description: "Zenodo archive of version 1.0.0"
 license: MIT
 repository-code: "https://github.com/hpmadival/imd-data-puller"
 abstract: >-

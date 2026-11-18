@@ -1,5 +1,7 @@
 # IMD Data Puller
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24352511.svg)](https://doi.org/10.5281/zenodo.24352511)
+
 A small web app that gets India Meteorological Department (IMD) daily gridded data
 for a **point**, a **box**, or your own **catchment boundaries**, and gives it back
 as ready-to-use files.
@@ -139,7 +141,7 @@ datasets it uses.
 
 > Madival, H. P. (2026). *IMD Data Puller: a web app for India Meteorological Department gridded
 > rainfall and temperature for points, areas and catchments* (Version 1.0.0) [Computer software].
-> https://github.com/hpmadival/imd-data-puller
+> Zenodo. https://doi.org/10.5281/zenodo.24352511
 
 GitHub's **"Cite this repository"** button (on the right of this page) gives this in APA and BibTeX.
 
