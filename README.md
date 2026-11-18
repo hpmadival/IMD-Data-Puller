@@ -39,33 +39,29 @@ Downloaded IMD files are saved in a data folder and reused, so each year is down
 | `imd_tools.py` | The engine: downloading, reading, averaging, summaries, indices, trends, downloads |
 | `charts.py` | The charts |
 | `requirements.txt` | The Python packages needed |
-| `Run in Colab.ipynb` | Starts the app in Google Colab and gives you a link |
 
-## Three ways to run it
+## Two ways to run it
 
-### 1. In Google Colab (easiest, nothing to install)
-1. Put the whole `imd-data-app` folder in **My Drive** in Google Drive.
-2. Open `Run in Colab.ipynb` from Drive with Google Colab.
-3. Run the cells from top to bottom and click the link it prints.
+### 1. Online (easiest): open the web link
+The app runs on Streamlit Community Cloud. Open its link in any browser; nothing to install.
 
-The IMD files are kept in `My Drive/IMD data`, so they survive after Colab shuts down.
-The link changes each time you start the app.
+- If nobody has used it for a few days, it goes to sleep. The first visit then takes about a minute.
+- Downloaded IMD files are not kept for long on the free hosting, so pulls there are slower.
+- Memory is limited, so keep requests to a few catchments and a few decades at a time.
+- Any change saved to this GitHub repository updates the app by itself within a few minutes.
 
-### 2. On your own laptop
+To set up your own copy: sign in at share.streamlit.io with GitHub, choose this repository,
+branch `main` and file `app.py`, pick Python 3.12 under Advanced settings, and click Deploy.
+
+### 2. On your own laptop (fastest, best for big pulls)
+You need Python 3.10 or newer (from python.org). Download this repository (on this page,
+**Code → Download ZIP**, then unzip it), open a terminal in that folder, and run:
 ```
 pip install -r requirements.txt
 streamlit run app.py
 ```
-Your browser opens the app. Downloaded files go into an `imd-data` folder next to the app,
-unless you change the data folder in the sidebar.
-
-### 3. Online, so others can use it (Streamlit Community Cloud, free)
-1. Put these files in a GitHub repository.
-2. Sign in at share.streamlit.io with GitHub, choose the repository, and pick `app.py`.
-3. You get a permanent link to share with your lab.
-
-Note: free hosting does not keep downloaded files for long, so pulls there are slower,
-and memory is limited (keep requests to a few catchments and a few decades at a time).
+Your browser opens the app. Downloaded IMD files go into an `imd-data` folder next to the app
+and are reused next time, so each year is downloaded only once.
 
 ## How to use it
 
@@ -78,8 +74,9 @@ and memory is limited (keep requests to a few catchments and a few decades at a 
    - **Upload boundary file:** a zipped shapefile (or the .shp, .shx, .dbf and .prj parts together),
      GeoJSON, GeoPackage or KML. Pick the column that holds the catchment names.
 3. Check the blue grid cells on the map.
-4. Press **Get the data**. Look through the tabs (Overview, Charts, Compare sites,
-   Rain indices, Trends, Map of grid cells), then download the zip or the Excel workbook.
+4. Press **Get the data**. Look through the sections (Overview, Charts, Compare sites,
+   Rain indices, Trends, Map of grid cells), then download the zip of CSV files or make
+   the Excel workbook.
 
 ## How the numbers are worked out
 
@@ -102,7 +99,7 @@ and memory is limited (keep requests to a few catchments and a few decades at a 
 
 ## Using the engine without the app
 
-The engine works on its own in any notebook:
+The engine works on its own in any Python script or notebook on your laptop:
 
 ```python
 import imd_tools as T
