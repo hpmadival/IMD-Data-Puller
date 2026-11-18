@@ -130,6 +130,40 @@ open("results.zip", "wb").write(T.build_zip(res, tables))
 open("results.xlsx", "wb").write(T.build_excel(res, tables))
 ```
 
+## How to cite
+
+If you use IMD Data Puller in a paper, thesis or report, please cite the tool **and** the IMD
+datasets it uses.
+
+**The tool**
+
+> Madival, H. P. (2026). *IMD Data Puller: a web app for India Meteorological Department gridded
+> rainfall and temperature for points, areas and catchments* (Version 1.0.0) [Computer software].
+> https://github.com/hpmadival/imd-data-puller
+
+GitHub's **"Cite this repository"** button (on the right of this page) gives this in APA and BibTeX.
+
+**The data**
+
+- Pai, D. S., Sridhar, L., Rajeevan, M., Sreejith, O. P., Satbhai, N. S., & Mukhopadhyay, B. (2014).
+  Development of a new high spatial resolution (0.25° × 0.25°) long period (1901–2010) daily
+  gridded rainfall data set over India and its comparison with existing data sets over the region.
+  *Mausam*, 65(1), 1–18.
+- Srivastava, A. K., Rajeevan, M., & Kshirsagar, S. R. (2009). Development of a high resolution daily
+  gridded temperature data set (1969–2005) for the Indian region. *Atmospheric Science Letters*,
+  10(4), 249–254. https://doi.org/10.1002/asl.232
+
+**Related tool**
+
+The download addresses come from imdlib: Nandi, S., Patel, P., & Swain, S. (2022). IMDLIB: A python
+library for IMD gridded data. Zenodo. https://doi.org/10.5281/zenodo.7205414
+
+## Licence
+
+The code is released under the MIT licence (see `LICENSE`): you may use, change and share it, as
+long as you keep the copyright notice. The licence covers the code only; the data belongs to the
+India Meteorological Department.
+
 ## Data credit
 
 IMD Pune gridded data. Rainfall: Pai et al. (2014), Mausam 65(1). Temperature: Srivastava

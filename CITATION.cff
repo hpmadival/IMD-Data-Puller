@@ -1,0 +1,76 @@
+cff-version: 1.2.0
+message: "If you use IMD Data Puller in your work, please cite it as below, and also cite the IMD datasets (see the references)."
+type: software
+title: "IMD Data Puller: a web app for India Meteorological Department gridded rainfall and temperature for points, areas and catchments"
+authors:
+  - family-names: Madival
+    given-names: Harshit Prakash
+version: 1.0.0
+date-released: 2026-11-19
+license: MIT
+repository-code: "https://github.com/hpmadival/imd-data-puller"
+abstract: >-
+  IMD Data Puller is a free web app that downloads India Meteorological
+  Department (IMD) daily gridded rainfall (0.25 degree, from 1901) and
+  maximum and minimum temperature (1 degree, from 1951) for points, boxes,
+  drawn outlines or uploaded catchment boundaries. It computes area-weighted
+  catchment averages with data-coverage checks, Hargreaves potential
+  evaporation, monthly and yearly summaries, rainfall indices and
+  Mann-Kendall / Sen's slope trends, and exports CSV, Excel and NetCDF files.
+keywords:
+  - India Meteorological Department
+  - IMD gridded data
+  - rainfall
+  - temperature
+  - hydrology
+  - catchment
+  - Streamlit
+references:
+  - type: article
+    title: "Development of a new high spatial resolution (0.25° × 0.25°) long period (1901-2010) daily gridded rainfall data set over India and its comparison with existing data sets over the region"
+    authors:
+      - family-names: Pai
+        given-names: D. S.
+      - family-names: Sridhar
+        given-names: Latha
+      - family-names: Rajeevan
+        given-names: M.
+      - family-names: Sreejith
+        given-names: O. P.
+      - family-names: Satbhai
+        given-names: N. S.
+      - family-names: Mukhopadhyay
+        given-names: B.
+    journal: "Mausam"
+    volume: 65
+    issue: 1
+    start: 1
+    end: 18
+    year: 2014
+  - type: article
+    title: "Development of a high resolution daily gridded temperature data set (1969-2005) for the Indian region"
+    authors:
+      - family-names: Srivastava
+        given-names: A. K.
+      - family-names: Rajeevan
+        given-names: M.
+      - family-names: Kshirsagar
+        given-names: S. R.
+    journal: "Atmospheric Science Letters"
+    volume: 10
+    issue: 4
+    start: 249
+    end: 254
+    year: 2009
+    doi: "10.1002/asl.232"
+  - type: software
+    title: "IMDLIB: A python library for IMD gridded data"
+    authors:
+      - family-names: Nandi
+        given-names: Saswata
+      - family-names: Patel
+        given-names: Pratiman
+      - family-names: Swain
+        given-names: Sabyasachi
+    year: 2022
+    doi: "10.5281/zenodo.7205414"
