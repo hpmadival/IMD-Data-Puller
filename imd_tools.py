@@ -497,6 +497,8 @@ class Result:
     variables: list
     start_year: int
     end_year: int
+    start_date: object = None                         # first day kept (a date)
+    end_date: object = None                           # last day kept (a date)
     daily: dict = field(default_factory=dict)        # site name -> DataFrame
     cells: pd.DataFrame = None                        # grid cells used
     cell_values: dict = field(default_factory=dict)   # (site, var) -> DataFrame
@@ -517,7 +519,8 @@ DATE_SHIFT_TEXT = {
 
 def pull_data(sites, variables, start_year, end_year, data_dir, add_pet=False,
               keep_cell_values=False, keep_grid=False, rain_shift=0,
-              days_since_rain_mm=None, progress=None, backup_dir=BACKUP_DIR, parallel=3):
+              days_since_rain_mm=None, progress=None, backup_dir=BACKUP_DIR, parallel=3,
+              start_date=None, end_date=None):
     """Download (if needed) and extract daily data for every site.
 
     rain_shift: 0, -1 or +1 days, to line rainfall dates up with other records.
@@ -690,6 +693,21 @@ def pull_data(sites, variables, start_year, end_year, data_dir, add_pet=False,
     if days_since_rain_mm is not None:
         res.settings["Rainy day threshold for 'Days since rain'"] = f"{days_since_rain_mm} mm"
     res.cells = pd.concat(cell_tables, ignore_index=True) if cell_tables else pd.DataFrame()
+
+    # --- keep only the chosen dates (whole IMD years are read, then trimmed) ---
+    first = pd.Timestamp(start_date) if start_date is not None else dates[0]
+    last = pd.Timestamp(end_date) if end_date is not None else dates[-1]
+    res.start_date, res.end_date = first.date(), last.date()
+    if first != dates[0] or last != dates[-1]:
+        for name in list(res.daily):
+            res.daily[name] = res.daily[name].loc[first:last]
+        for key in list(res.cell_values):
+            res.cell_values[key] = res.cell_values[key].loc[first:last]
+        for var in list(res.grids):
+            res.grids[var] = res.grids[var].sel(time=slice(first, last))
+        if first.month != 1 or first.day != 1 or last.month != 12 or last.day != 31:
+            res.notes.append("Your dates don't cover whole years, so months and years that are only "
+                             "partly inside them are left empty in the monthly and yearly summaries.")
     say(1.0, "Done")
     return res
 
@@ -731,19 +749,32 @@ def _how(column):
     return "mean"
 
 
+def _period_days(index, freq):
+    """Number of calendar days in each month ('MS') or year ('YS') starting at index."""
+    if freq == "MS":
+        return pd.Series(index.days_in_month, index=index)
+    return pd.Series([days_in_year(y) for y in index.year], index=index)
+
+
+def _complete(series, freq):
+    """True for each month or year where every calendar day has a value."""
+    g = series.resample(freq)
+    count = g.count()
+    return count == _period_days(count.index, freq)
+
+
 def _aggregate(df, freq):
     """Monthly ('MS') or yearly ('YS') totals for rain/evaporation and means for
-    temperature. A period with any missing day is left empty, so totals are never
-    quietly too small."""
+    temperature. A period with any missing day, or only partly inside the chosen
+    dates, is left empty, so totals are never quietly too small."""
     out = {}
     for col in df.columns:
         if col == DAYS_SINCE_RAIN:
             continue
         s = df[col]
         g = s.resample(freq)
-        complete = g.count() == g.size()
         val = g.sum() if _how(col) == "total" else g.mean()
-        out[col] = val.where(complete).round(2)
+        out[col] = val.where(_complete(s, freq)).round(2)
     return pd.DataFrame(out)
 
 
@@ -761,7 +792,7 @@ def yearly_table(df):
         s = df[rain]
         jjas = s[s.index.month.isin([6, 7, 8, 9])]
         g = jjas.resample("YS")
-        mons = g.sum().where(g.count() == g.size())
+        mons = g.sum().where(_complete(s, "YS").reindex(g.sum().index, fill_value=False))
         y.insert(list(y.columns).index(rain) + 1, "Monsoon rainfall, June to September (mm)",
                  mons.reindex(y.index).round(2))
     y.insert(0, "Year", y.index.year)
@@ -848,7 +879,7 @@ def rain_indices(df):
     rows = []
     for year, s in df[col].groupby(df.index.year):
         row = {"Year": year}
-        if s.isna().any():
+        if s.isna().any() or len(s) < days_in_year(year):
             row.update({k: np.nan for k in INDEX_INFO})
         else:
             v = s.values
@@ -1102,7 +1133,8 @@ def settings_text(res):
         "Variables": [VARIABLES[v]["name"] for v in res.variables]
                      + (["Potential evaporation (Hargreaves)"] if any(
                          PET_COLUMN in d for d in res.daily.values()) else []),
-        "Years": f"{res.start_year} to {res.end_year}",
+        "Dates": f"{res.start_date:%d/%m/%Y} to {res.end_date:%d/%m/%Y}" if res.start_date else
+                 f"{res.start_year} to {res.end_year}",
         "Sites": [{"Name": s.name,
                    "Type": "Point" if s.is_point else "Area",
                    "Latitude": round(s.centre[0], 5), "Longitude": round(s.centre[1], 5)}

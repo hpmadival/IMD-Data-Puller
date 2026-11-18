@@ -198,13 +198,16 @@ with panel:
                                    "maximum and minimum temperature. Both are pulled automatically.")
 
         st.markdown("<div class='panel-title'>2 · WHEN</div>", unsafe_allow_html=True)
-        years_choice = st.radio("Years", ["1991 to 2020", "Last 10 years", "Full record", "Choose years"],
+        years_choice = st.radio("Period", ["1991 to 2020", "Last 10 years", "Full record", "Choose dates"],
                                 horizontal=True, key="f_years_choice", label_visibility="collapsed")
-        c1, c2 = st.columns(2)
-        pick_start = c1.number_input("From", 1901, THIS_YEAR, 1991, step=1, key="f_start")
-        pick_end = c2.number_input("To", 1901, THIS_YEAR, 2020, step=1, key="f_end")
-        st.caption("From and To are used when 'Choose years' is selected. Rainfall starts in 1901, "
-                   "temperature in 1951; a year appears a few months after it ends.")
+        picked = st.date_input("Dates (used with 'Choose dates')",
+                               value=(datetime.date(LAST_YEAR, 6, 1), datetime.date(LAST_YEAR, 9, 30)),
+                               min_value=datetime.date(1901, 1, 1), max_value=TODAY,
+                               format="DD/MM/YYYY", key="f_dates",
+                               help="Click the box to open the calendar, then click the first day and the "
+                                    "last day. You can also type dates as dd/mm/yyyy.")
+        st.caption("Rainfall starts on 01/01/1901, temperature on 01/01/1951. A year's data appears a "
+                   "few months after it ends.")
 
         st.markdown("<div class='panel-title'>3 · EXTRA OUTPUTS</div>", unsafe_allow_html=True)
         keep_cells = st.checkbox("Daily values of every grid cell (CSV)", key="f_cells",
@@ -408,7 +411,17 @@ elif years_choice == "Full record":
     need_first = [T.VARIABLES[v]["first_year"] for v in (set(variables) | ({"tmax", "tmin"} if add_pet else set()))]
     start_year, end_year = (max(need_first) if need_first else 1901), LAST_YEAR
 else:
-    start_year, end_year = int(pick_start), int(pick_end)
+    start_year = end_year = None
+date_problem = None
+if years_choice == "Choose dates":
+    if isinstance(picked, (tuple, list)) and len(picked) == 2:
+        start_date, end_date = picked
+        start_year, end_year = start_date.year, end_date.year
+    else:
+        date_problem = "Pick both a first and a last day on the calendar."
+        start_date = end_date = None
+else:
+    start_date, end_date = datetime.date(start_year, 1, 1), datetime.date(end_year, 12, 31)
 
 if submitted:
     sites = current_sites()
@@ -417,8 +430,10 @@ if submitted:
         problems.append("Add at least one place on the map first.")
     if not variables and not add_pet:
         problems.append("Choose at least one variable.")
-    if start_year > end_year:
-        problems.append("The 'From' year is after the 'To' year.")
+    if date_problem:
+        problems.append(date_problem)
+    elif start_date > end_date:
+        problems.append("The first day is after the last day.")
     if add_dsr and "rain" not in variables:
         problems.append("'Days since rain' needs Rainfall to be one of the variables.")
     outside = T.check_inside_india(sites) if sites else []
@@ -437,7 +452,7 @@ if submitted:
             res = T.pull_data(sites, variables, start_year, end_year, data_dir,
                               add_pet=add_pet, keep_cell_values=keep_cells, keep_grid=keep_grid,
                               rain_shift=rain_shift, days_since_rain_mm=dsr_mm if add_dsr else None,
-                              backup_dir=backup_dir,
+                              backup_dir=backup_dir, start_date=start_date, end_date=end_date,
                               progress=lambda f, msg: bar.progress(min(max(f, 0.0), 1.0),
                                                                    text=f"{msg}  ({first_msg})" if n_files else msg))
             bar.progress(1.0, text="Working out summaries and packing the files")
@@ -461,7 +476,7 @@ def show_table(df, **kw):
 # results, not the whole page (the map and sidebar are left alone).
 
 def downloads_box(res, tables):
-    period = f"{res.start_year}-{res.end_year}"
+    period = f"{res.start_date:%d-%m-%Y} to {res.end_date:%d-%m-%Y}"
     d1, d2 = st.columns(2)
     d1.download_button("⬇️ Everything (zip of CSV files)", ss.result["zip"], file_name=f"IMD data {period}.zip",
                        mime="application/zip", type="primary", width="stretch")
@@ -497,6 +512,12 @@ def summary_cards(res, tables, site):
             day = df.loc[df.index.year == int(ri.loc[i, "Year"]), rain].idxmax()
             cards.append(("Wettest day", f"{ri.loc[i, 'Wettest day (mm)']:.0f} mm",
                           f"On {day:%d %b %Y}."))
+        main = rain
+    elif rain in df and df[rain].notna().any():
+        r = df[rain]
+        cards.append(("Total rainfall", f"{r.sum():,.0f} mm", "Over the chosen dates."))
+        cards.append(("Rainy days", f"{int((r >= T.RAINY_DAY_MM).sum())}", "Days with 2.5 mm or more."))
+        cards.append(("Wettest day", f"{r.max():.0f} mm", f"On {r.idxmax():%d %b %Y}."))
         main = rain
     else:
         for v in ("tmax", "tmin"):
@@ -671,7 +692,7 @@ def results_section():
     site_names = [s.name for s in res.sites]
     st.divider()
     st.subheader("Results")
-    st.caption(f"{len(res.sites)} site(s), {res.start_year} to {res.end_year}. "
+    st.caption(f"{len(res.sites)} site(s), {res.start_date:%d/%m/%Y} to {res.end_date:%d/%m/%Y}. "
                "These are for the settings used when you last pressed the button.")
     downloads_box(res, tables)
     if res.problems:

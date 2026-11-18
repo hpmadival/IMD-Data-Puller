@@ -78,8 +78,8 @@ and the results below.
    - **type coordinates** or **load a CSV** of points (latitude and longitude columns).
    Every place appears in the **Places** list under the map, where you can rename or remove it.
    The blue squares show the IMD grid cells that will be used (darker = more of the cell is inside).
-2. **Left panel:** pick the variables, the years (1991 to 2020, the last 10 years, the full record,
-   or your own), and any extra outputs. Rarely needed settings (rainfall date shift, "days since
+2. **Left panel:** pick the variables, the period (1991 to 2020, the last 10 years, the full record,
+   or **Choose dates**: exact days picked on a calendar, shown as dd/mm/yyyy), and any extra outputs. Rarely needed settings (rainfall date shift, "days since
    rain", data folder) are under **Advanced options**. Nothing reloads while you change these.
 3. Press **Get the data**. The app says how many files it must download from IMD and roughly how long
    it will take; files are saved and reused next time.
@@ -99,7 +99,8 @@ parties and may draw borders differently; the dark outline is the one to go by.
   data, so a coastal point uses the nearest land cell. The distance is listed in `Grid cells used.csv`.
 - **Area:** each cell's weight is the share of the catchment area it covers. On a day when
   a cell is missing, the other cells share out its weight.
-- **Monthly and yearly values** are left empty if any day is missing, so totals are never quietly too small.
+- **Monthly and yearly values** are left empty if any day is missing, or if the month or year is only
+  partly inside your chosen dates, so totals are never quietly too small.
 - **Potential evaporation (Hargreaves, FAO-56):**
   0.0023 × Ra × (mean temperature + 17.8) × square root of (max − min temperature),
   where Ra is the sun's radiation at the top of the atmosphere for that latitude and day.
