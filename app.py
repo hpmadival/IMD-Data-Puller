@@ -46,14 +46,15 @@ ss.setdefault("f_years_choice", "Last 10 years")
 # --- a cleaner look: hide Streamlit's own menu, header and footer, tighten spacing ---
 st.markdown("""
 <style>
-#MainMenu, footer, header[data-testid="stHeader"] {visibility: hidden; height: 0;}
-div[data-testid="stToolbar"] {display: none;}
+footer {visibility: hidden; height: 0;}
+header[data-testid="stHeader"] {background: transparent;}
 .block-container {padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1500px;}
-div[data-testid="stMetric"] {background: #f5f8fc; border: 1px solid #e3e9f2; border-radius: 10px;
+div[data-testid="stMetric"] {background: rgba(42,120,214,0.07); border: 1px solid rgba(128,140,155,0.28);
+                             border-radius: 10px;
                              padding: 10px 14px;}
-div[data-testid="stMetricLabel"] p {font-size: 0.85rem; color: #52606d;}
-.panel-title {font-size: 0.8rem; letter-spacing: .04em; color: #6b7785; margin: 0.6rem 0 0.1rem 0;}
-.hint {color: #52606d; font-size: 0.92rem; margin-bottom: 0.3rem;}
+div[data-testid="stMetricLabel"] p {font-size: 0.85rem; opacity: 0.75;}
+.panel-title {font-size: 0.8rem; letter-spacing: .04em; opacity: 0.65; margin: 0.6rem 0 0.1rem 0;}
+.hint {font-size: 0.92rem; opacity: 0.8; margin-bottom: 0.3rem;}
 </style>""", unsafe_allow_html=True)
 
 
@@ -110,6 +111,14 @@ def preview_cells(wkb, var):
 def area_of(wkb):
     from shapely import wkb as W
     return T.area_km2(W.loads(wkb))
+
+
+def dark_mode():
+    """True when the visitor is viewing the app in dark mode."""
+    try:
+        return (st.context.theme.type or "light") == "dark"
+    except Exception:
+        return False
 
 
 def current_sites():
@@ -178,6 +187,7 @@ if head_r.button("✨ Try an example", width="stretch",
                  help="Loads a sample point and area near Mangaluru, with the last 10 years."):
     ss.load_example = True
     st.rerun()
+head_r.caption("🌗 Light, dark or system theme: open the ⋮ menu at the top right.")
 
 panel, mapcol = st.columns([1, 2.6], gap="medium")
 data_dir_default = os.environ.get("IMD_DATA_DIR", "imd-data")
@@ -247,15 +257,20 @@ def build_map(sites, grid_var, base):
                    min_zoom=4, prefer_canvas=True)
     if base == "Light map":
         folium.TileLayer("Esri.WorldGrayCanvas", name="Light map").add_to(m)
+    elif base == "Dark map":
+        folium.TileLayer(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+            attr="Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ", name="Dark map", max_zoom=16).add_to(m)
     elif base == "Satellite":
         folium.TileLayer("Esri.WorldImagery", name="Satellite").add_to(m)
     else:
         folium.TileLayer("OpenStreetMap", name="Street map").add_to(m)
-    line = "#ffffff" if base == "Satellite" else "#8a8f98"
+    on_dark = base in ("Satellite", "Dark map")
+    line = "#ffffff" if base == "Satellite" else ("#aab2bd" if base == "Dark map" else "#8a8f98")
     folium.GeoJson(grids[grid_var], name="IMD grid", interactive=False,
                    style_function=lambda _: {"color": line, "weight": 0.5, "opacity": 0.45}).add_to(m)
     folium.GeoJson(india, name="India boundary", interactive=False,
-                   style_function=lambda _: {"color": "#3d4652" if base != "Satellite" else "#ffffff",
+                   style_function=lambda _: {"color": "#e6e9ee" if on_dark else "#3d4652",
                                              "weight": 1.3, "fill": False}).add_to(m)
     gj = cells_geojson(sites, grid_var)
     if 0 < len(gj["features"]) <= 20000:
@@ -290,11 +305,13 @@ def build_map(sites, grid_var, base):
 @st.fragment
 def map_section():
     sites = current_sites()
-    t1, t2 = st.columns([1.4, 1])
+    t1, t2 = st.columns([1, 1.3])
     grid_label = t1.radio("Grid", ["Rainfall grid (0.25°)", "Temperature grid (1°)"], horizontal=True,
                           key="grid_choice", label_visibility="collapsed")
-    base = t2.radio("Base map", ["Light map", "Street map", "Satellite"], horizontal=True,
-                    key="base_choice", label_visibility="collapsed")
+    bases = ["Light map", "Dark map", "Street map", "Satellite"]
+    if "base_choice" not in ss:
+        ss.base_choice = "Dark map" if dark_mode() else "Light map"
+    base = t2.radio("Base map", bases, horizontal=True, key="base_choice", label_visibility="collapsed")
     grid_var = "rain" if grid_label.startswith("Rain") else "tmax"
     if not sites:
         st.markdown("<div class='hint'>Use the tools on the map's left edge: 📍 a point, ▭ a box, or "
@@ -581,7 +598,7 @@ def charts_tab(res, site_names):
             st.altair_chart(chart, width="stretch")
             if not np.isnan(slope):
                 verdict = "a clear trend" if p < 0.05 else "no clear trend"
-                st.caption(f"Dashed grey line: long-term average ({mean:.1f}). Dotted black line: trend, "
+                st.caption(f"Dashed grey line: long-term average ({mean:.1f}). Dotted orange line: trend, "
                            f"{slope * 10:+.2f} per decade. Mann-Kendall p-value {p:.3f}, which means "
                            f"{verdict} (below 0.05 is usually read as clear).")
             else:

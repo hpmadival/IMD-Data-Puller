@@ -49,7 +49,7 @@ Downloaded IMD files are saved in a data folder and reused, so each year is down
 | `analysis.py` | Design rainfall (return periods) and the drought index (SPI) |
 | `report.py` | The "Explain my catchment" Word report |
 | `india_boundary.geojson` | India's boundary for the map (simplified from the India country boundary shapefile) |
-| `.streamlit/config.toml` | The app's colours and font |
+| `.streamlit/config.toml` | The app's colours for light and dark mode, and its font |
 | `requirements.txt` | The Python packages needed |
 
 ## Two ways to run it
@@ -98,9 +98,12 @@ and the results below.
 
 New here? Press **✨ Try an example** at the top right.
 
+**Light or dark?** Open the **⋮** menu at the top right and choose **System** (follows your computer),
+**Light** or **Dark**. In dark mode the map starts on a dark base map too.
+
 The map shows India's boundary from the India country boundary shapefile (simplified for the web)
 and the IMD grid as faint lines. Switch between the rainfall grid (0.25°) and the temperature grid
-(1°), and between the light, street and satellite base maps. Background map tiles come from third
+(1°), and between the light, dark, street and satellite base maps. Background map tiles come from third
 parties and may draw borders differently; the dark outline is the one to go by.
 
 ## How the numbers are worked out

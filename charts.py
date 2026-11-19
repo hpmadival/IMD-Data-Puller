@@ -76,7 +76,7 @@ def yearly(yt, col):
         ok = yt[col].notna().values
         intercept = np.median(yt[col].values[ok] - slope * xs[ok])
         tl = pd.DataFrame({"Year": yt.Year.values, "Trend": intercept + slope * xs})
-        layers.append(alt.Chart(tl).mark_line(color="#0b0b0b", strokeWidth=1.5, strokeDash=[1, 3]).encode(
+        layers.append(alt.Chart(tl).mark_line(color=SERIES[1], strokeWidth=2, strokeDash=[2, 3]).encode(
             x=x, y="Trend:Q",
             tooltip=[alt.Tooltip("Year:O"), alt.Tooltip("Trend:Q", format=".1f", title="Trend line")]))
     return alt.layer(*layers).properties(height=320), mean, slope, p
@@ -118,7 +118,7 @@ def heatmap(mt, col):
     d = mt[["Year", "Month", col]].copy()
     d["Month name"] = [MONTHS[m - 1] for m in d.Month]
     ramp = ORANGE_RAMP if is_temperature(col) else BLUE_RAMP
-    return alt.Chart(d).mark_rect(stroke="white", strokeWidth=1).encode(
+    return alt.Chart(d).mark_rect(stroke="#80808040", strokeWidth=1).encode(
         x=alt.X("Year:O", title=None, axis=alt.Axis(labelAngle=0, labelOverlap=True)),
         y=alt.Y("Month name:O", sort=MONTHS, title=None),
         color=alt.Color(f"{col}:Q", scale=alt.Scale(range=ramp), title=col,
@@ -179,7 +179,7 @@ def return_levels(am, duration=1):
         pass
     lines = pd.concat(lines)
     domain = ["Gumbel", "GEV", "Observed yearly largest"]
-    colour = alt.Color("Series:N", scale=alt.Scale(domain=domain, range=[BLUE, SERIES[1], "#1f2933"]),
+    colour = alt.Color("Series:N", scale=alt.Scale(domain=domain, range=[BLUE, SERIES[1], GREY]),
                        legend=alt.Legend(orient="top", title=None))
     x_enc = alt.X("Return period (years):Q", scale=alt.Scale(type="log", domain=[1, 100]),
                   axis=alt.Axis(values=[1, 2, 5, 10, 25, 50, 100], format="d"))
