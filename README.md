@@ -21,6 +21,12 @@ as ready-to-use files.
   clear trend (Mann-Kendall test)
 - **Charts:** daily (zoomable), year by year with average and trend lines, wetter or drier
   than average, a month-by-month heatmap, the average year, and a comparison of sites
+- **Design rainfall:** the rainfall expected once in 2, 5, 10, 25, 50 and 100 years, for 1, 2, 3 and
+  5 days in a row (Gumbel and GEV curves fitted by L-moments), for culverts, check dams and drains
+- **Drought index:** the Standardised Precipitation Index (SPI) at 1, 3, 6 and 12 months, with a list
+  of drought periods ranked by severity
+- **"Explain my catchment" report:** a Word report in plain English with a map, charts and tables,
+  ready to edit and paste into a thesis or project report
 - **A map of grid cells** coloured by their long-term value, to see how rainfall changes across a catchment
 - **Rainfall date shift:** move rainfall one day earlier or later to line up with streamflow records
 - **"Days since rain" column** for picking dry-weather (recession) periods
@@ -40,6 +46,8 @@ Downloaded IMD files are saved in a data folder and reused, so each year is down
 | `app.py` | The screens: choosing data, the map, charts and download buttons |
 | `imd_tools.py` | The engine: downloading, reading, averaging, summaries, indices, trends, downloads |
 | `charts.py` | The charts |
+| `analysis.py` | Design rainfall (return periods) and the drought index (SPI) |
+| `report.py` | The "Explain my catchment" Word report |
 | `india_boundary.geojson` | India's boundary for the map (simplified from the India country boundary shapefile) |
 | `.streamlit/config.toml` | The app's colours and font |
 | `requirements.txt` | The Python packages needed |
@@ -86,7 +94,7 @@ and the results below.
 3. Press **Get the data**. The app says how many files it must download from IMD and roughly how long
    it will take; files are saved and reused next time.
 4. **Results:** headline numbers for each site, then the sections Overview, Charts, Compare sites,
-   Rain indices, Trends and Map of grid cells. Download the zip of CSV files or make the Excel workbook.
+   Rain indices, Trends, Design rainfall, Drought index, Map of grid cells and Report. Download the zip of CSV files or make the Excel workbook.
 
 New here? Press **✨ Try an example** at the top right.
 
@@ -112,6 +120,15 @@ parties and may draw borders differently; the dark outline is the one to go by.
 - **Trends:** Sen's slope is the median of the slopes between every pair of years, so one odd
   year cannot pull it much. A Mann-Kendall p-value below 0.05 is usually read as a clear
   trend. At least 8 years are needed.
+- **Design rainfall:** the largest 1, 2, 3 and 5-day totals of each complete year are fitted with two
+  standard curves, Gumbel and GEV, using L-moments (checked against the lmoments3 library). "Once in
+  25 years" means a 4% chance in any one year. At least 10 complete years are needed; 30 or more are
+  recommended. IMD's days run from 8:30 am to 8:30 am, so these are fixed-day totals; for the largest
+  24 hours at any start time, engineers often multiply 1-day values by 1.13 (WMO).
+- **Drought index (SPI):** monthly rain is added up over 1, 3, 6 or 12 months; for each calendar month
+  a gamma curve is fitted (allowing for months with no rain), and each total is turned into how many
+  standard deviations it is from normal. −1 or less is dry, −2 or less extremely dry. "Normal" is the
+  period you pulled, so 30 or more years give the fairest comparison.
 - **Dryness index** = mean annual potential evaporation ÷ mean annual rainfall
   (above 1 means drier, below 1 means wetter).
 

@@ -12,3 +12,6 @@ netCDF4
 requests
 openpyxl
 altair>=5
+scipy
+matplotlib
+python-docx

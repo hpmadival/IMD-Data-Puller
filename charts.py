@@ -158,3 +158,57 @@ def index_bars(ri, col):
         y=alt.Y(f"{col}:Q"),
         tooltip=[alt.Tooltip("Year:O"), alt.Tooltip(f"{col}:Q", format=".1f")],
     ).properties(height=300)
+
+
+def return_levels(am, duration=1):
+    """Observed yearly largest rainfall against fitted Gumbel and GEV curves (log x-axis)."""
+    import analysis as A
+    col = f"Largest {duration}-day rainfall (mm)"
+    x = am[col].values
+    obs, t_obs = A.plotting_positions(x)
+    pts = pd.DataFrame({"Return period (years)": t_obs, "Rainfall (mm)": obs, "Series": "Observed yearly largest"})
+    ts = np.logspace(np.log10(1.05), 2, 60)
+    xi, a = A.fit_gumbel(x)
+    lines = [pd.DataFrame({"Return period (years)": ts,
+                           "Rainfall (mm)": [A.gumbel_quantile(xi, a, t) for t in ts], "Series": "Gumbel"})]
+    try:
+        g = A.fit_gev(x)
+        lines.append(pd.DataFrame({"Return period (years)": ts,
+                                   "Rainfall (mm)": [A.gev_quantile(*g, t) for t in ts], "Series": "GEV"}))
+    except Exception:
+        pass
+    lines = pd.concat(lines)
+    domain = ["Gumbel", "GEV", "Observed yearly largest"]
+    colour = alt.Color("Series:N", scale=alt.Scale(domain=domain, range=[BLUE, SERIES[1], "#1f2933"]),
+                       legend=alt.Legend(orient="top", title=None))
+    x_enc = alt.X("Return period (years):Q", scale=alt.Scale(type="log", domain=[1, 100]),
+                  axis=alt.Axis(values=[1, 2, 5, 10, 25, 50, 100], format="d"))
+    curves = alt.Chart(lines).mark_line(strokeWidth=2).encode(
+        x=x_enc, y=alt.Y("Rainfall (mm):Q", title=f"{duration}-day rainfall (mm)", scale=alt.Scale(zero=False)),
+        color=colour, strokeDash=alt.condition(alt.datum.Series == "GEV", alt.value([6, 3]), alt.value([1, 0])),
+        tooltip=[alt.Tooltip("Series:N"), alt.Tooltip("Return period (years):Q", format=".0f"),
+                 alt.Tooltip("Rainfall (mm):Q", format=".1f")])
+    dots = alt.Chart(pts).mark_point(filled=True, size=50).encode(
+        x=x_enc, y="Rainfall (mm):Q", color=colour,
+        tooltip=[alt.Tooltip("Return period (years):Q", format=".1f", title="Observed return period"),
+                 alt.Tooltip("Rainfall (mm):Q", format=".1f")])
+    return (curves + dots).properties(height=330)
+
+
+def spi_bars(spi_table, scale=3):
+    """SPI month by month: blue above zero (wetter), red below (drier)."""
+    col = f"SPI {scale}-month"
+    d = spi_table.dropna(subset=[col]).copy()
+    d["Month start"] = pd.to_datetime(dict(year=d.Year, month=d.Month, day=1))
+    d["Compared with normal"] = np.where(d[col] >= 0, "Wetter", "Drier")
+    bars = alt.Chart(d).mark_bar().encode(
+        x=alt.X("Month start:T", title=None),
+        y=alt.Y(f"{col}:Q", title=f"{scale}-month SPI"),
+        color=alt.Color("Compared with normal:N", scale=alt.Scale(domain=["Wetter", "Drier"], range=[BLUE, RED]),
+                        legend=alt.Legend(orient="top", title=None)),
+        tooltip=[alt.Tooltip("Month start:T", format="%b %Y", title="Month"), alt.Tooltip(f"{col}:Q", format=".2f"),
+                 alt.Tooltip(f"{col} class:N", title="Class")])
+    rules = alt.Chart(pd.DataFrame({"y": [-2, -1.5, -1, 1, 1.5, 2]})).mark_rule(
+        color=GREY, strokeDash=[2, 3], strokeWidth=0.8).encode(y="y:Q")
+    zero = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(color=GREY).encode(y="y:Q")
+    return (bars + rules + zero).properties(height=300)

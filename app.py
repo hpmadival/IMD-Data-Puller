@@ -625,6 +625,77 @@ def indices_tab(tables, site_names):
     show_table(ri.drop(columns="Site"))
 
 
+def design_tab(res, tables, site_names):
+    import analysis as A
+    st.write("The rainfall you can expect **once in 2, 5, 10, 25, 50 or 100 years**, for 1, 2, 3 and 5 days "
+             "in a row. Engineers use these for culverts, check dams and drains. 'Once in 25 years' means a "
+             "4% chance in any one year, not exactly every 25 years.")
+    a, b = st.columns(2)
+    site = a.selectbox("Site", site_names, key="dr_site")
+    dur = b.selectbox("Rain over", [1, 2, 3, 5], format_func=lambda d: f"{d} day" + ("s" if d > 1 else ""),
+                      key="dr_dur")
+    df = res.daily[site]
+    table, notes = A.design_rainfall(df)
+    if table.empty:
+        st.info(" ".join(notes))
+        return
+    am = A.annual_maxima(df)
+    st.altair_chart(C.return_levels(am, dur), width="stretch")
+    st.caption("Dots: each year's largest rainfall, placed at how often it is matched or beaten. Lines: two "
+               "standard curves fitted to the dots by L-moments. Where they differ, the 50 and 100-year values "
+               "are less certain.")
+    show_table(table)
+    for n in notes:
+        st.caption("• " + n)
+    with st.expander("Largest rainfall of each year"):
+        show_table(am)
+
+
+def drought_tab(res, tables, site_names):
+    import analysis as A
+    st.write("The **Standardised Precipitation Index (SPI)** shows how unusually wet or dry each period was "
+             "compared with the years you pulled: 0 is normal, −1 or less is dry, +1 or more is wet. "
+             "The 3-month index follows seasonal droughts, the 12-month index longer dry spells.")
+    a, b = st.columns(2)
+    site = a.selectbox("Site", site_names, key="spi_site")
+    scale = b.selectbox("Time scale", A.SPI_SCALES, index=1, format_func=lambda k: f"{k}-month",
+                        key="spi_scale")
+    sp, notes = A.spi(res.daily[site])
+    if sp.empty:
+        st.info(" ".join(notes))
+        return
+    st.altair_chart(C.spi_bars(sp, scale), width="stretch")
+    ev = A.drought_periods(sp, scale)
+    st.write(f"**Drought periods** ({scale}-month SPI of −1 or less), most severe first")
+    if len(ev):
+        show_table(ev)
+    else:
+        st.caption("No drought periods in this time span.")
+    for n in notes:
+        st.caption("• " + n)
+    with st.expander("SPI month by month"):
+        show_table(sp)
+
+
+def report_tab(res, tables, site_names):
+    st.write("A short **Word report** for one site, written in plain English, with a map, charts and tables: "
+             "the place, rainfall at a glance, temperature and evaporation, heavy rainfall for design, "
+             "droughts, cautions, and the data credits. Ready to edit and paste into a thesis or report.")
+    site = st.selectbox("Site", site_names, key="rep_site")
+    reports = ss.result.setdefault("reports", {})
+    if site not in reports:
+        if st.button(f"Make the report for {site}", type="primary"):
+            import report as R
+            with st.spinner("Writing the report"):
+                reports[site] = R.build_report(res, tables, site)
+    if site in reports:
+        st.download_button(f"⬇️ Report for {site} (Word)", reports[site],
+                           file_name=f"{T.safe_file_name(site)} rainfall report.docx",
+                           mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                           type="primary")
+        st.caption("Opens in Word, Google Docs or LibreOffice. Check the wording and add your own discussion.")
+
+
 def trends_tab(res, tables, site_names):
     tr = tables["Trends"]
     if tr.empty:
@@ -705,7 +776,8 @@ def results_section():
                 st.write("• " + n)
 
     # Only the chosen section is drawn (tabs would draw every chart at once).
-    sections = ["Overview", "Charts", "Rain indices", "Trends", "Map of grid cells"]
+    sections = ["Overview", "Charts", "Rain indices", "Trends", "Design rainfall", "Drought index",
+                "Map of grid cells", "Report"]
     if len(res.sites) > 1:
         sections.insert(2, "Compare sites")
     section = st.segmented_control("Show", sections, default="Overview", key="section",
@@ -718,6 +790,12 @@ def results_section():
         compare_tab(tables, site_names)
     elif section == "Rain indices":
         indices_tab(tables, site_names)
+    elif section == "Design rainfall":
+        design_tab(res, tables, site_names)
+    elif section == "Drought index":
+        drought_tab(res, tables, site_names)
+    elif section == "Report":
+        report_tab(res, tables, site_names)
     elif section == "Trends":
         trends_tab(res, tables, site_names)
     else:
