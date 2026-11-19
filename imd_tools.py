@@ -30,14 +30,26 @@ import requests
 import shapely
 from shapely.geometry import Point, box
 
-try:  # use imdlib's download addresses so an imdlib update also updates these
-    from imdlib.util import ARCHIVE_URLS
-except Exception:  # pragma: no cover - fallback if imdlib changes its layout
-    ARCHIVE_URLS = {
-        "rain": ("https://imdpune.gov.in/cmpg/Griddata/rainfall.php", "rain"),
-        "tmax": ("https://imdpune.gov.in/cmpg/Griddata/maxtemp.php", "maxtemp"),
-        "tmin": ("https://imdpune.gov.in/cmpg/Griddata/mintemp.php", "mintemp"),
-    }
+# IMD's download addresses (the same ones imdlib uses). imdlib itself is only loaded
+# when a download is needed, because importing it takes over a second at start-up.
+_DEFAULT_URLS = {
+    "rain": ("https://imdpune.gov.in/cmpg/Griddata/rainfall.php", "rain"),
+    "tmax": ("https://imdpune.gov.in/cmpg/Griddata/maxtemp.php", "maxtemp"),
+    "tmin": ("https://imdpune.gov.in/cmpg/Griddata/mintemp.php", "mintemp"),
+}
+_urls_cache = None
+
+
+def archive_urls():
+    """IMD's download addresses: imdlib's current ones if available, else the built-in copy."""
+    global _urls_cache
+    if _urls_cache is None:
+        try:
+            from imdlib.util import ARCHIVE_URLS as found
+            _urls_cache = {k: found[k] for k in _DEFAULT_URLS}
+        except Exception:
+            _urls_cache = dict(_DEFAULT_URLS)
+    return _urls_cache
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +189,7 @@ def download_year(var, year, data_dir, timeout=300, tries=3, backup_dir=None):
         shutil.copyfile(grd_path(backup_dir, var, year), path + ".part")
         os.replace(path + ".part", path)
         return "copied from backup"
-    url, form_key = ARCHIVE_URLS[var]
+    url, form_key = archive_urls()[var]
     expected = VARIABLES[var]["grid"].file_size(days_in_year(year))
     last_error = None
     for _ in range(tries):

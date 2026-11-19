@@ -67,16 +67,24 @@ def india_layers():
     grids drawn as thin lines, clipped to India. Worked out once per server."""
     with open(os.path.join(HERE, "india_boundary.geojson"), encoding="utf-8") as f:
         india = json.load(f)
-    area = shapely.simplify(shape(india["geometry"]).buffer(0.05), 0.05)
+    india_geom = shape(india["geometry"])
+    area = shapely.simplify(india_geom.buffer(0.05), 0.05)
     grids = {}
     for key, grid in (("rain", T.RAIN_GRID), ("tmax", T.TEMP_GRID)):
         x0, y0, x1, y1 = grid.bounds
         xs = np.arange(x0, x1 + 1e-9, grid.step)
         ys = np.arange(y0, y1 + 1e-9, grid.step)
-        lines = ([shapely.LineString([(x, y0), (x, y1)]) for x in xs] +
-                 [shapely.LineString([(x0, y), (x1, y)]) for y in ys])
-        clipped = shapely.set_precision(shapely.intersection(shapely.MultiLineString(lines), area), 0.001)
+        lines = np.array([shapely.LineString([(x, y0), (x, y1)]) for x in xs] +
+                         [shapely.LineString([(x0, y), (x1, y)]) for y in ys])
+        # cut each line to India on its own (cutting them together chops every line at every
+        # crossing and makes the map about 25 times heavier)
+        parts = shapely.get_parts(shapely.intersection(lines, area))
+        parts = parts[(shapely.get_type_id(parts) == 1) & ~shapely.is_empty(parts)]
+        clipped = shapely.set_precision(shapely.MultiLineString(list(parts)), 0.001)
         grids[key] = {"type": "Feature", "properties": {}, "geometry": mapping(clipped)}
+    # a lighter copy of the boundary for the map (looks the same at map scale)
+    india = {"type": "Feature", "properties": {},
+             "geometry": mapping(shapely.set_precision(shapely.simplify(india_geom, 0.01), 0.001))}
     return india, grids
 
 
@@ -255,6 +263,10 @@ def build_map(sites, grid_var, base):
     india, grids = india_layers()
     m = folium.Map(location=INDIA_CENTRE, zoom_start=INDIA_ZOOM, tiles=None, control_scale=True,
                    min_zoom=4, prefer_canvas=True)
+    # folium loads jQuery, Bootstrap and icon fonts by default; this map uses none of them,
+    # so leave them out (fewer files for the browser to fetch)
+    m.default_js = [js for js in m.default_js if js[0] == "leaflet"]
+    m.default_css = [css for css in m.default_css if css[0] == "leaflet_css"]
     if base == "Light map":
         folium.TileLayer("Esri.WorldGrayCanvas", name="Light map").add_to(m)
     elif base == "Dark map":
