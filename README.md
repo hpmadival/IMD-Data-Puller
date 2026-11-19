@@ -98,8 +98,9 @@ and the results below.
 
 New here? Press **✨ Try an example** at the top right.
 
-**Light or dark?** Open the **⋮** menu at the top right and choose **System** (follows your computer),
-**Light** or **Dark**. In dark mode the map starts on a dark base map too.
+**Light or dark?** Use the **☀️ Light / 🌙 Dark / 💻 System** toggle at the top right (System follows
+your computer's setting). The choice is remembered on that browser. In dark mode the map starts on a
+dark base map too. The same choice is also in the **⋮** menu.
 
 The map shows India's boundary from the India country boundary shapefile (simplified for the web)
 and the IMD grid as faint lines. Switch between the rainfall grid (0.25°) and the temperature grid

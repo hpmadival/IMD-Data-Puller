@@ -195,7 +195,37 @@ if head_r.button("✨ Try an example", width="stretch",
                  help="Loads a sample point and area near Mangaluru, with the last 10 years."):
     ss.load_example = True
     st.rerun()
-head_r.caption("🌗 Light, dark or system theme: open the ⋮ menu at the top right.")
+THEMES = {"☀️ Light": "Light", "🌙 Dark": "Dark", "💻 System": "System"}
+if "theme_choice" not in ss:
+    ss.theme_choice = "🌙 Dark" if dark_mode() else "☀️ Light"
+    ss.theme_applied = ss.theme_choice
+choice = head_r.segmented_control("Theme", list(THEMES), key="theme_choice", width="stretch",
+                                  label_visibility="collapsed",
+                                  help="Light, dark, or follow your computer's setting (System).")
+if choice and choice != ss.get("theme_applied"):
+    ss.theme_applied = choice
+    # Streamlit has no command to change the theme, so this presses its own theme button
+    # (in the ⋮ menu) for the visitor, then closes the menu again.
+    st.html(f"""<script>
+    (async () => {{
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      const doc = document;
+      const menuBtn = doc.querySelector('[data-testid="stMainMenu"] button') || doc.querySelector('[data-testid="stMainMenu"]');
+      if (!menuBtn) return;
+      const item = () => doc.querySelector('[data-testid="stMainMenuItem-theme-{THEMES[choice]}"]');
+      const isOpen = () => !!doc.querySelector('[data-testid^="stMainMenuItem"]');
+      if (!isOpen()) menuBtn.click();
+      for (let i = 0; i < 40 && !item(); i++) await wait(25);
+      if (item()) item().click();
+      await wait(60);
+      for (let i = 0; i < 5 && isOpen(); i++) {{
+        const el = doc.querySelector('[data-testid^="stMainMenuItem"]') || doc.body;
+        el.dispatchEvent(new KeyboardEvent('keydown', {{key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true}}));
+        await wait(60);
+        if (isOpen()) {{ menuBtn.click(); await wait(80); }}
+      }}
+    }})();
+    </script>""", unsafe_allow_javascript=True)
 
 panel, mapcol = st.columns([1, 2.6], gap="medium")
 data_dir_default = os.environ.get("IMD_DATA_DIR", "imd-data")
